@@ -43,11 +43,17 @@ if isinstance(df_15m.columns, pd.MultiIndex):
 if isinstance(df_daily.columns, pd.MultiIndex):
     df_daily.columns = df_daily.columns.get_level_values(0)
 
-# Dünün Günlük Kapanışından Klasik Pivotlar
-yesterday = df_daily.iloc[-2] if len(df_daily) >= 2 else df_daily.iloc[-1]
-H_day = float(yesterday['High'])
-L_day = float(yesterday['Low'])
-C_day = float(yesterday['Close'])
+# Dünün Günlük Kapanışından Klasik Pivotlar (Hatasız Tarih Kontrolü)
+# Eğer listenin son satırı bugüne aitse dünü (iloc[-2]), değilse en son tamamlanan günü (iloc[-1]) alır
+today_date = pd.Timestamp.now().date()
+if df_daily.index[-1].date() == today_date and len(df_daily) >= 2:
+    last_closed_day = df_daily.iloc[-2]
+else:
+    last_closed_day = df_daily.iloc[-1]
+
+H_day = float(last_closed_day['High'])
+L_day = float(last_closed_day['Low'])
+C_day = float(last_closed_day['Close'])
 
 Pivot = (H_day + L_day + C_day) / 3
 R1 = (2 * Pivot) - L_day
