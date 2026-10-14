@@ -16,44 +16,45 @@ st.markdown("""
 
 st.title("⚡ NETCD.IS 15 Dakikalık Gün İçi Terminali")
 
+# Kenar Çubuğu
 st.sidebar.header("Ayarlar")
 ticker = st.sidebar.text_input("Hisse", value="NETCD.IS")
 days = st.sidebar.selectbox("Görünüm Aralığı", ["5 Gün", "15 Gün", "30 Gün"], index=0)
 day_map = {"5 Gün": "5d", "15 Gün": "15d", "30 Gün": "30d"}
 
-# 60 saniye önbellek: Sayfa her açıldığında anında yüklenir
-@st.cache_data(ttl=60)
+# Manuel Önbellek Temizleme Butonu
+if st.sidebar.button("🔄 Verileri Yenile (Önbelleği Temizle)"):
+    st.cache_data.clear()
+
+# 30 saniye TTL ile veri çekme
+@st.cache_data(ttl=30)
 def fetch_data(symbol, p_15m):
-    d_15m = yf.download(symbol, period=p_15m, interval="15m", progress=False)
-    d_daily = yf.download(symbol, period="5d", interval="1d", progress=False)
-    return d_15m, d_daily
+    return yf.download(symbol, period=p_15m, interval="15m", progress=False)
 
-try:
-    df_15m, df_daily = fetch_data(ticker, day_map[days])
-except Exception as e:
-    st.error("Veri çekilirken hata oluştu.")
-    st.stop()
+df_15m = fetch_data(ticker, day_map[days])
 
-if df_15m.empty or df_daily.empty:
+if df_15m.empty:
     st.warning("Veri bulunamadı veya borsa kapalı.")
     st.stop()
 
 if isinstance(df_15m.columns, pd.MultiIndex):
     df_15m.columns = df_15m.columns.get_level_values(0)
-if isinstance(df_daily.columns, pd.MultiIndex):
-    df_daily.columns = df_daily.columns.get_level_values(0)
 
-# Dünün Günlük Kapanışından Klasik Pivotlar (Hatasız Tarih Kontrolü)
-# Eğer listenin son satırı bugüne aitse dünü (iloc[-2]), değilse en son tamamlanan günü (iloc[-1]) alır
-today_date = pd.Timestamp.now().date()
-if df_daily.index[-1].date() == today_date and len(df_daily) >= 2:
-    last_closed_day = df_daily.iloc[-2]
+# Tarih Ayrıştırması
+df_15m['Date'] = df_15m.index.date
+unique_dates = sorted(df_15m['Date'].unique())
+
+# GÜNLÜK PİVOTU 15 DAKİKALIK GERÇEK GÜN BARLARINDAN HESAPLAMA (En Sağlam Yöntem)
+# Eğer en az 2 gün varsa dünün (tamamlanan günün) barlarını alır
+if len(unique_dates) >= 2:
+    target_date = unique_dates[-2]  # Dünün tarihi
 else:
-    last_closed_day = df_daily.iloc[-1]
+    target_date = unique_dates[-1]
 
-H_day = float(last_closed_day['High'])
-L_day = float(last_closed_day['Low'])
-C_day = float(last_closed_day['Close'])
+prev_day_bars = df_15m[df_15m['Date'] == target_date]
+H_day = float(prev_day_bars['High'].max())
+L_day = float(prev_day_bars['Low'].min())
+C_day = float(prev_day_bars['Close'].iloc[-1])
 
 Pivot = (H_day + L_day + C_day) / 3
 R1 = (2 * Pivot) - L_day
@@ -73,7 +74,6 @@ df_15m['RSI'] = 100 - (100 / (1 + rs))
 
 # VWAP Hesabı
 df_15m['Typical_Price'] = (df_15m['High'] + df_15m['Low'] + df_15m['Close']) / 3
-df_15m['Date'] = df_15m.index.date
 df_15m['Vol_Price'] = df_15m['Typical_Price'] * df_15m['Volume']
 df_15m['Cum_Vol_Price'] = df_15m.groupby('Date')['Vol_Price'].cumsum()
 df_15m['Cum_Vol'] = df_15m.groupby('Date')['Volume'].cumsum()
@@ -81,7 +81,7 @@ df_15m['VWAP'] = df_15m['Cum_Vol_Price'] / df_15m['Cum_Vol'].replace(0, np.nan)
 df_15m['VWAP'] = df_15m['VWAP'].bfill().ffill()
 
 curr = df_15m.iloc[-1]
-prev = df_15m.iloc[-2]
+prev = df_15m.iloc[-2] if len(df_15m) >= 2 else curr
 last_price = float(curr['Close'])
 curr_vwap = float(curr['VWAP'])
 curr_rsi = float(curr['RSI'])
@@ -107,7 +107,7 @@ else:
     st.info(f"⚪ **KONSOLİDASYON:** Denge seviyeleri etrafında yatay hareket.")
 
 # Seviye Tablosu
-st.markdown("### 📋 Günlük Seviye Tablosu (Midas Atlas Girişleri İçin)")
+st.markdown(f"### 📋 Günlük Seviye Tablosu (Baz Alınan Gün: `{target_date}`)")
 c_s, c_p, c_r = st.columns(3)
 with c_s:
     st.write(f"🛑 **S1 Destek:** `{S1:.2f} TL` | **S2 Destek:** `{S2:.2f} TL`")
